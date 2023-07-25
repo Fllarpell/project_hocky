@@ -16,6 +16,16 @@ from aiogram.utils.exceptions import (MessageToEditNotFound, MessageCantBeEdited
 import fix_file
 
 #Исправить username( есть не у всех), также возможность дублировать добавление /add мероприятий
+import secrets
+import string
+
+
+def generate_alphanum_crypt_string(length):
+    letters_and_digits = string.ascii_letters + string.digits
+    crypt_rand_string = ''.join(secrets.choice(letters_and_digits) for i in range(length))
+    return crypt_rand_string
+
+
 
 
 # АПИ ТОКЕН
@@ -34,22 +44,31 @@ storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
 # Секрет-слово или секрет-фраза для получения админки
-@dp.message_handler(lambda message: message.text.lower() == 'админами не становятся - админами рождаются!')
+@dp.message_handler(lambda message: message.text.lower() == 'админами не становятся - админами рождаются!' and message.chat.type == 'private')
 async def Russia_become_the_admin(message: types.Message):
 	gr = c_u.execute('select groups from admins').fetchall()
 	if gr == []:
 		gr = 'group_1'
 	else:
-		gr1 = sorted([int(x[0].split('_')[1]) for x in c_u.execute('select groupss from admins').fetchall()])
+		gr1 = sorted([int(x[0].split('_')[1]) for x in c_u.execute('select groups from admins').fetchall()])
 		gr = 'group_' + str(gr1[-1]+1)
 	if c_u.execute('select * from admins where tgID=?', (message.from_user.id, )).fetchone() is None:
 		c_u.execute('insert into admins (groups, tgID) values ("{}", {})'.format(gr, message.from_user.id))
 		conn_u.commit()
 		await message.answer('О Великий админ, премного благодарен, что вы с нами!')
-		c_u.execute('INSERT INTO parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+		if c_u.execute('select * from parents where tgID=? and nickname=? and username=?', (message.from_user.id, message.from_user.first_name, "@"+message.from_user.username)).fetchone() is None:
+			c_u.execute('INSERT INTO parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+						'VALUES ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'
+						''.format(gr, message.from_user.id, 'None', 'None', 0, 'True', message.from_user.first_name, "@"+message.from_user.username))
+			conn_u.commit()
+		else:
+			q = c_u.execute('select * from parents where tgID=?', (message.from_user.id,)).fetchall()
+			for i in q:
+				c_u.execute('INSERT INTO parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
 					'VALUES ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'
-					''.format(gr, message.from_user.id, 'None', 'None', 0, 'True', message.from_user.first_name, "@"+message.from_user.username))
-		conn_u.commit()
+					''.format(gr, message.from_user.id, i[2], i[3], i[4], 'True', message.from_user.first_name, "@" + message.from_user.username))
+				conn_u.commit()
+
 		kb = InlineKeyboardMarkup()
 		ready = InlineKeyboardButton(text = 'Готов(а)✅', callback_data = 'Ready_for_register')
 		await message.answer(
@@ -107,13 +126,31 @@ async def send_welcome(message: types.Message):
 				if exist_parent is not None:
 
 					if c_u.execute('select * from parents where groups=? and tgID=? and username=? and nickname=? and groupID=?', (gr, us[0], us[2], us[1], message.chat.id)).fetchone() is None:
-						if c_u.execute('select groupID from parents where groups=? and tgID=? and username=? and nickname=?', (gr, us[0], us[2], us[1])).fetchone() == 0:
-							c_u.execute('update parents set groupID=? where groups=? and tgID=? and username=? and nickname=?', (message.chat.id, gr, us[0], us[2], us[1]))
-							conn_u.commit()
-						else:
-							q2 = c_u.execute('insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+						try:
+							if c_u.execute('select groupID from parents where groups=? and tgID=? and username=? and nickname=?', (gr, us[0], us[2], us[1])).fetchone()[0] == 0:
+								c_u.execute('update parents set groupID=? where groups=? and tgID=? and username=? and nickname=?', (message.chat.id, gr, us[0], us[2], us[1]))
+								conn_u.commit()
+							else:
+								if 'True' in [x[0] for x in c_u.execute(
+										'select organisator from parents where tgID=? and username=? and nickname=?',
+										(us[0], us[2], us[1])).fetchall()]:
+									grr = c_u.execute('select groups from admins where tgID=?', (us[0],)).fetchone()[0]
+									q2 = c_u.execute(
+										'insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+										'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(grr, us[0],
+																									 exist_parent[2],
+																									 exist_parent[3],
+																									 message.chat.id,
+																									 "True", us[1],
+																									 us[2]))
+									conn_u.commit()
+
+						except TypeError:
+
+							q3 = c_u.execute('insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
 											 'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(gr, us[0], exist_parent[2], exist_parent[3], message.chat.id, "False", us[1], us[2]))
 							conn_u.commit()
+
 				else:
 					if c_u.execute('select * from parents where groups=? and tgID=? and username=? and nickname=? and groupID=?', (gr, us[0], us[2], us[1], message.chat.id)).fetchone() is None:
 
@@ -136,10 +173,25 @@ async def send_welcome(message: types.Message):
 			gr2 = c_u.execute('select groups from groups where groupID=?', (message.chat.id,)).fetchall()
 			for grps in gr2:
 				for us in _users:
+
 					if c_u.execute('select * from parents where groups=? and tgID=? and username=? and nickname=? and groupID=?', (grps[0], us[0], us[2], us[1], message.chat.id)).fetchone() is None:
-						q2 = c_u.execute('insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
-										 'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(grps[0], us[0], "None", "None", message.chat.id, "False", us[1], us[2]))
-						conn_u.commit()
+						if c_u.execute('select * from admins whete tgID=?', (us[0],)).fetchone() is None:
+							q2 = c_u.execute('insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+											 'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(grps[0], us[0], "None", "None", message.chat.id, "False", us[1], us[2]))
+							conn_u.commit()
+						'''else:
+							q2 = c_u.execute(
+								'insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+								'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(grps[0], us[0], "None",
+																							 "None", message.chat.id,
+																							 "False", us[1], us[2]))
+							conn_u.commit()
+							grr = c_u.execute('select groups from admins where tgID=?', (us[0],)).fetchone()[0]
+							q2 = c_u.execute(
+								'insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+								'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(grr, us[0], "None", "None", message.chat.id, "True", us[1], us[2]))
+							conn_u.commit()'''
+
 
 						await message.reply(f'@{us[2]}\n\n'
 											 f'🚩 Приветствую тебя, {us[1]}, новый участник, беседы "{message.chat.title}"!👋\n'
@@ -211,7 +263,7 @@ async def get_i_parent(message: types.Message, state: FSMContext):
 async def right_fio(callback_query: types.CallbackQuery, state: FSMContext):
 	F = callback_query.message.text.split('\n')[0].split(': ')[1]
 	I = callback_query.message.text.split('\n')[1].split(': ')[1]
-	c_u.execute("UPDATE parents SET last_name=?, first_name=?WHERE tgID=?", (F, I, callback_query.from_user.id))
+	c_u.execute("UPDATE parents SET last_name=?, first_name=? WHERE tgID=?", (F, I, callback_query.from_user.id))
 	conn_u.commit()
 	all_FIO = f'{F} {I}'
 	c_u.execute("UPDATE active_events SET parent=? WHERE tgID=?", (all_FIO, callback_query.from_user.id))
@@ -373,10 +425,15 @@ async def event_output(message: types.Message, state: FSMContext):
 		reply_markup = keyboard.add(yeah, nope)
 	)
 	gr = c_u.execute('select groups from admins where tgID=?', (message.from_user.id, )).fetchone()[0]
-	q = f"INSERT INTO 'Event' (groups, datee, namee, org, summ, tgID) VALUES ('{gr}', '{user_data['chosen_date_event']}', '{user_data['chosen_name_event']}', '{message.text}', '{user_data['chosen_sum_event']}', {message.from_user.id})"
-	c_u.execute(q)
-	conn_u.commit()
-	await state.finish()
+	for i in range(1000):
+		rand_str = generate_alphanum_crypt_string(16)
+		if c_u.execute('select * from Event where eventID=?', (rand_str,)).fetchone() is None:
+			q = f"INSERT INTO 'Event' (groups, datee, namee, org, summ, tgID, eventID) VALUES ('{gr}', " \
+				f"'{user_data['chosen_date_event']}', '{user_data['chosen_name_event']}', '{message.text}', '{user_data['chosen_sum_event']}', {message.from_user.id}, '{rand_str}')"
+			c_u.execute(q)
+			conn_u.commit()
+			await state.finish()
+			return
 
 # генератор inline-кнопок для рассылки
 def genmarkup(data):
@@ -407,45 +464,84 @@ async def ne_rassilka(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(lambda call: '-' in call.data)
 async def rasslka(callback_query: types.CallbackQuery):
 
-	adm_id = callback_query.from_user.id
-	gr = c_u.execute('select groups from admins where tgID=?', (adm_id,)).fetchone()[0]
+	if callback_query.message.text.split(' ')[0] != '/news':
 
-	# FIX TUTA
-	if c_u.execute('select organisator from parents where tgID=?', (callback_query.from_user.id,)).fetchone()[0] == 'False':
-		c_u.execute('update parents set organisator=? where tgID=?', ('True', callback_query.from_user.id,))
-		conn_u.commit()
-	if c_u.execute('select * from parents where groupID=? and groups=?', (callback_query.data, gr)).fetchone() is None:
-		prnts = c_u.execute('select * from parents where groupID=?', (callback_query.data,)).fetchall()
-		for parent in prnts:
-			if c_u.execute('select * from groups where groups=? and groupID=?', (gr, parent[5])).fetchone() is None:
-				namee = c_u.execute('select groupTitle from groups where groupID=?', (parent[5],)).fetchone()[0]
-				c_u.execute('insert into groups (groups, groupID, groupTitle) '
-							'values ("{}", {}, "{}")'.format(gr, parent[5], namee))
-				conn_u.commit()
+		adm_id = callback_query.from_user.id
+		gr = c_u.execute('select groups from admins where tgID=?', (adm_id,)).fetchone()[0]
 
-			# FIX TUTA
-			if adm_id == parent[5]:
-				c_u.execute('insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+		# FIX TUTA
+		if c_u.execute('select organisator from parents where tgID=?', (callback_query.from_user.id,)).fetchone()[0] == 'False':
+			c_u.execute('update parents set organisator=? where tgID=?', ('True', callback_query.from_user.id,))
+			conn_u.commit()
+		if c_u.execute('select * from parents where groupID=? and groups=?', (callback_query.data, gr)).fetchone() is None:
+			prnts = c_u.execute('select * from parents where groupID=?', (callback_query.data,)).fetchall()
+			for parent in prnts:
+				if c_u.execute('select * from groups where groups=? and groupID=?', (gr, parent[5])).fetchone() is None:
+					namee = c_u.execute('select groupTitle from groups where groupID=?', (parent[5],)).fetchone()[0]
+					c_u.execute('insert into groups (groups, groupID, groupTitle) '
+								'values ("{}", {}, "{}")'.format(gr, parent[5], namee))
+					conn_u.commit()
+
+				# FIX TUTA
+				if adm_id == parent[5]:
+					c_u.execute('insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+							'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(gr, parent[1], parent[2], parent[3], parent[5], "True", parent[7], parent[8]))
+					conn_u.commit()
+				else:
+					c_u.execute('insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+						'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(gr, parent[1], parent[2],parent[3], parent[5], "False", parent[7], parent[8]))
+					conn_u.commit()
+
+		await callback_query.answer('Отправил куда надо!')
+		kb = InlineKeyboardMarkup()
+		uch = InlineKeyboardButton(text = 'Участвую', callback_data = 'Участвую')
+		neuch = InlineKeyboardButton(text = 'Не участвую', callback_data = 'Не участвую')
+
+		try:
+			await bot.send_message(chat_id = callback_query.data, text = callback_query.message.text, reply_markup = kb.add(uch, neuch))
+		except aiogram.utils.exceptions.MigrateToChat as e:
+			chat_ID = str(e).split(' New id: ')[1].split('.')[0].strip()
+			c_u.execute('update groups set groupID=? where groupID=?', (int(chat_ID), int(callback_query.data), ))
+			conn_u.commit()
+			await bot.send_message(chat_id = chat_ID, text = callback_query.message.text, reply_markup = kb.add(uch, neuch))
+	else:
+		adm_id = callback_query.from_user.id
+		gr = c_u.execute('select groups from admins where tgID=?', (adm_id,)).fetchone()[0]
+
+		# FIX TUTA
+		if c_u.execute('select organisator from parents where tgID=?', (callback_query.from_user.id,)).fetchone()[0] == 'False':
+			c_u.execute('update parents set organisator=? where tgID=?', ('True', callback_query.from_user.id,))
+			conn_u.commit()
+		if c_u.execute('select * from parents where groupID=? and groups=?',(callback_query.data, gr)).fetchone() is None:
+			prnts = c_u.execute('select * from parents where groupID=?', (callback_query.data,)).fetchall()
+			for parent in prnts:
+				if c_u.execute('select * from groups where groups=? and groupID=?', (gr, parent[5])).fetchone() is None:
+					namee = c_u.execute('select groupTitle from groups where groupID=?', (parent[5],)).fetchone()[0]
+					c_u.execute('insert into groups (groups, groupID, groupTitle) '
+								'values ("{}", {}, "{}")'.format(gr, parent[5], namee))
+					conn_u.commit()
+
+				# FIX TUTA
+				if adm_id == parent[5]:
+					c_u.execute(
+						'insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
 						'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(gr, parent[1], parent[2], parent[3], parent[5], "True", parent[7], parent[8]))
-				conn_u.commit()
-			else:
-				c_u.execute('insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
-					'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(gr, parent[1], parent[2],parent[3], parent[5], "False", parent[7], parent[8]))
-				conn_u.commit()
+					conn_u.commit()
+				else:
+					c_u.execute(
+						'insert into parents (groups, tgID, last_name, first_name, groupID, organisator, nickname, username) '
+						'values ("{}", {}, "{}", "{}", {}, "{}", "{}", "{}")'.format(gr, parent[1], parent[2], parent[3], parent[5], "False", parent[7], parent[8]))
+					conn_u.commit()
 
+		await callback_query.answer('Отправил куда надо!')
 
-	await callback_query.answer('Отправил куда надо!')
-	kb = InlineKeyboardMarkup()
-	uch = InlineKeyboardButton(text = 'Участвую', callback_data = 'Участвую')
-	neuch = InlineKeyboardButton(text = 'Не участвую', callback_data = 'Не участвую')
-
-	try:
-		await bot.send_message(chat_id = callback_query.data, text = callback_query.message.text, reply_markup = kb.add(uch, neuch))
-	except aiogram.utils.exceptions.MigrateToChat as e:
-		chat_ID = str(e).split(' New id: ')[1].split('.')[0].strip()
-		c_u.execute('update groups set groupID=? where groupID=?', (int(chat_ID), int(callback_query.data), ))
-		conn_u.commit()
-		await bot.send_message(chat_id = chat_ID, text = callback_query.message.text, reply_markup = kb.add(uch, neuch))
+		try:
+			await bot.send_message(chat_id = callback_query.data, text = callback_query.message.text.replace('/news', '', 1))
+		except aiogram.utils.exceptions.MigrateToChat as e:
+			chat_ID = str(e).split(' New id: ')[1].split('.')[0].strip()
+			c_u.execute('update groups set groupID=? where groupID=?', (int(chat_ID), int(callback_query.data),))
+			conn_u.commit()
+			await bot.send_message(chat_id = chat_ID, text = callback_query.message.text.replace('/news', '', 1))
 
 # Принимает участие в мероприятии
 @dp.callback_query_handler(lambda call: call.data == 'Участвую')
@@ -506,17 +602,9 @@ async def participation(callback_query: types.CallbackQuery, state: FSMContext):
 				else:
 					kb = InlineKeyboardMarkup()
 					paid = InlineKeyboardButton(text = 'Оплачено', callback_data = 'paid')
-					await state.set_state(UploadPhotoForm.mer)
-					await state.update_data(namee_mer = mer)
-					await state.set_state(UploadPhotoForm.dat)
-					await state.update_data(datee_mer = dat)
-					await state.set_state(UploadPhotoForm.org)
-					await state.update_data(org_mer = org)
-					await state.set_state(UploadPhotoForm.summ)
-					await state.update_data(summ_mer = summ)
 					await bot.send_message(chat_id = callback_query.from_user.id,
 										   text = f'Здравствуйте, {regist_parents[2] + " " + regist_parents[3]}👋!\n'
-												  f'Вы участвуете в мероприятии "{mer}", проходящее {dat}🗓!\n\n'
+												  f'Вы участвуете в мероприятии "{mer}", проходящее {dat}🗓 и проводящееся организатором "{org}"\n\n'
 												  f'Пожалуйста, оплатите мероприятие суммой в размере {summ}, после чего нажмите нажмите на кнопку под сообщением "Оплачено💸", а затем пришлите скрин-подтверждение оплаты!',
 										   reply_markup = kb.add(paid))
 					await callback_query.answer('Записал тебя на данное мероприятие')
@@ -592,6 +680,15 @@ async def participation(callback_query: types.CallbackQuery, state: FSMContext):
 # Захват скрина-подтверждения
 @dp.callback_query_handler(lambda call: call.data == 'paid')
 async def paid_mer(callback_query: types.CallbackQuery, state: FSMContext):
+	txt = callback_query.message.text
+	await state.set_state(UploadPhotoForm.mer)
+	await state.update_data(namee_mer = txt.split('"')[1])
+	await state.set_state(UploadPhotoForm.dat)
+	await state.update_data(datee_mer = txt.split(' проходящее ')[1].split('🗓')[0])
+	await state.set_state(UploadPhotoForm.org)
+	await state.update_data(org_mer = txt.split('"')[3])
+	await state.set_state(UploadPhotoForm.summ)
+	await state.update_data(summ_mer = txt.split(' в размере ')[1].split(', ')[0])
 	await callback_query.answer('Пришлите, пожалуйста, скрин-подтверждение')
 	await bot.send_message(chat_id = callback_query.from_user.id, text = 'Пришлите, пожалуйста, скрин-подтверждение')
 	await state.set_state(UploadPhotoForm.photo)
@@ -604,10 +701,10 @@ async def process_photo(message: types.Message, state: FSMContext):
 		await state.finish()
 
 		temp_fio = c_u.execute('SELECT * FROM parents WHERE tgID=?', (message.from_user.id, )).fetchone()
-		name_group = c_u.execute('SELECT groups FROM groups WHERE groupID=?', (temp_fio[4], )).fetchone()
+		name_group = c_u.execute('SELECT groups FROM groups WHERE groupID=?', (temp_fio[4], )).fetchone()[0]
 		admins = c_u.execute('SELECT * FROM admins where groups=?', (name_group, )).fetchall()
 
-		FIO = f"Мероприятие: {user_data['namee_mer']}\nДата: {user_data['datee_mer']}\nСумма: {user_data['summ_mer']}\nОрганизатор: {user_data['org_mer']}\n" + temp_fio[2] + ' ' + temp_fio[3] + f'\nUsername: @{temp_fio[7]}'
+		FIO = f"Мероприятие: {user_data['namee_mer']}\nДата: {user_data['datee_mer']}\nСумма: {user_data['summ_mer']}\nОрганизатор: {user_data['org_mer']}\nОплативший: " + temp_fio[2] + ' ' + temp_fio[3] + f'\nUsername: {temp_fio[7]}'
 		for ad in admins:
 			await bot.send_photo(chat_id = ad[1], photo = message.photo[0].file_id, caption = FIO)
 		await state.finish()
@@ -623,21 +720,23 @@ async def process_photo(message: types.Message, state: FSMContext):
 async def all_events_command(message: types.Message):
 	kb = InlineKeyboardMarkup()
 	exit = InlineKeyboardButton(text = 'Закрыть', callback_data = 'exit')
-	try:
-		# группы через таблицу groups искать
-		gr = c_u.execute('select groups from parents where tgID=?', (message.from_user.id, )).fetchone()[0]
-	except:
-		await message.answer(text = 'Не нашел вас в базе участников, пожалуйста, зарегистрируйтесь в боте и повторите попытку', reply_markup = kb.add(exit))
-		return 0
-	ev = c_u.execute('SELECT * FROM Event where groups = ? ', (gr, )).fetchall()
+
+	gr = set(c_u.execute('select groups from parents where tgID=?', (message.from_user.id,)).fetchall())
+
+	mers = []
+	for grp in gr:
+
+		ev = c_u.execute('SELECT * FROM Event where groups = ? ', (grp[0],)).fetchall()
+		for e in ev:
+			mers.append(e)
 	out = ""
 	cnt = 1
 	flag = False
-	for e in ev:
+	for e in mers:
 		if len(e) == 0:
 			flag = True
 			break
-		kb.add(InlineKeyboardButton(text = f'{e[2]}', callback_data = f'{e[2]}'))
+		kb.add(InlineKeyboardButton(text = f'{e[2]}', callback_data = f'{e[6]}'))
 		out += f"{cnt} мероприятие:\n\t\tДата мероприятия: {e[1]}\n\t\tНазвание мероприятия: {e[2]}\n\t\tОрганизатор мероприятия: {e[3]}\n\t\tСумма с каждого: {e[4]}\n\n"
 		cnt += 1
 
@@ -688,7 +787,6 @@ async def profile(message: types.Message):
 		F = c_u.execute('select last_name from parents where tgID=?', (message.from_user.id,)).fetchone()[0]
 	except:
 		F = 'Не указано'
-
 	try:
 		I = c_u.execute('select first_name from parents where tgID=?', (message.from_user.id,)).fetchone()[0]
 	except:
@@ -766,12 +864,18 @@ async def ready_for_register(callback_query: types.CallbackQuery):
 	kb = InlineKeyboardMarkup()
 	exit = InlineKeyboardButton(text = 'Закрыть', callback_data = 'exit')
 	bck = InlineKeyboardButton(text = "Профиль", callback_data = 'back_to_profile')
-	gr = c_u.execute('select groups from parents where tgID=?', (callback_query.from_user.id,)).fetchone()[0]
-	ev = c_u.execute('SELECT * FROM Event where groups = ? ', (gr,)).fetchall()
+	gr = set(c_u.execute('select groups from parents where tgID=?', (callback_query.from_user.id,)).fetchall())
+
+	mers = []
+	for grp in gr:
+		ev = c_u.execute('SELECT * FROM Event where groups = ? ', (grp[0],)).fetchall()
+		for e in ev:
+
+			mers.append(e)
 	out = "ВСЕ МЕРОПРИЯТИЯ:\n\n"
 	cnt = 1
-	for e in ev:
-		kb.add(InlineKeyboardButton(text = f'{e[2]}', callback_data = f'{e[2]}'))
+	for e in mers:
+		kb.add(InlineKeyboardButton(text = f'{e[2]}', callback_data = f'{e[6]}'))
 		out += f"{cnt} мероприятие:\n\t\tДата мероприятия: {e[1]}\n\t\tНазвание мероприятия: {e[2]}\n\t\tОрганизатор мероприятия: {e[3]}\n\t\tСумма с каждого: {e[4]}\n\n"
 		cnt += 1
 	await callback_query.message.edit_text(out, reply_markup = kb.add(bck, exit))
@@ -807,7 +911,7 @@ async def exit(callback_query: types.CallbackQuery):
 	asyncio.create_task(delete_message(callback_query.message, 0))
 
 # Вывод какого то "моего" ивента
-@dp.callback_query_handler(lambda call: call.data in ['my_'+x[0] for x in c_u.execute('select namee from Event').fetchall()])
+@dp.callback_query_handler(lambda call: call.data in ['my_'+x[0] for x in c_u.execute('select eventID from Event').fetchall()])
 async def react_ev(callback_query: types.CallbackQuery):
 	await callback_query.answer('Получаю информацию о мероприятии...')
 
@@ -821,7 +925,7 @@ async def react_ev(callback_query: types.CallbackQuery):
 		change = InlineKeyboardButton(text = 'Изменить событие(не работает)', callback_data = 'Изменить событие')
 		remove = InlineKeyboardButton(text = 'Удалить событие(не работает)', callback_data = 'Удалить событие')
 		gr = c_u.execute('select groups from admins where tgID=?', (callback_query.from_user.id,)).fetchone()[0]
-		q = c_u.execute(f'select * from Event where namee = ? and groups=?', (callback_query.data.split('_')[1], gr)).fetchone()
+		q = c_u.execute(f'select * from Event where eventID=?', (callback_query.data,)).fetchone()
 		await callback_query.message.edit_text(text = f"|Дата мероприятия: {q[1]}\n"
 		f"|Название мероприятия: {q[2]}\n"
 		f"|Организатор: {q[3]}\n"
@@ -833,7 +937,7 @@ async def react_ev(callback_query: types.CallbackQuery):
 		bck = InlineKeyboardButton(text = 'Назад', callback_data = 'back_my_ev')
 		spisok = InlineKeyboardButton(text = 'Список участников', callback_data = 'Список участников')
 		gr = c_u.execute('select groups from parents where tgID=?', (callback_query.from_user.id,)).fetchone()[0]
-		q = c_u.execute(f'select * from Event where namee = ? and groups=?', (callback_query.data.split('_')[1], gr)).fetchone()
+		q = c_u.execute(f'select * from Event where eventID=?', (callback_query.data,)).fetchone()
 		await callback_query.message.edit_text(text = f"|Дата мероприятия: {q[1]}\n"
 													  f"|Название мероприятия: {q[2]}\n"
 													  f"|Организатор: {q[3]}\n"
@@ -892,13 +996,15 @@ async def spisok_pers(callback_query: types.CallbackQuery):
 		await callback_query.message.edit_text(text = out, reply_markup = kb.add(bck, exit))
 
 # После выбора мероприятия для рассылки
-@dp.callback_query_handler(lambda call: call.data in [x[0] for x in c_u.execute('select namee from Event').fetchall()])
+@dp.callback_query_handler(lambda call: call.data in [x[0] for x in c_u.execute('select eventID from Event').fetchall()])
 async def react_ev(callback_query: types.CallbackQuery):
 	await callback_query.answer('Получаю информацию о мероприятии...')
+	q = c_u.execute(f'select * from Event where eventID=?', (callback_query.data,)).fetchone()
+
 
 	if c_u.execute('select * from admins where tgID=?', (callback_query.from_user.id, )).fetchone() is not None:
-		gr = c_u.execute('select groups from admins where tgID=?', (callback_query.from_user.id,)).fetchone()[0]
-		q = c_u.execute(f'select * from Event where namee = ? and groups=?', (callback_query.data, gr)).fetchone()
+
+
 		kb = InlineKeyboardMarkup()
 		bck = InlineKeyboardButton(text = 'Назад', callback_data = 'Назад')
 		ras = InlineKeyboardButton(text = 'Разослать', callback_data = 'хочу_разослать')
@@ -912,10 +1018,9 @@ async def react_ev(callback_query: types.CallbackQuery):
 		f"|Организатор: {q[3]}\n"
 		f"|Сумма мероприятия: {q[4]}\n", reply_markup = kb.add(ras,spisok).add(uch, neuch).add(change, remove).add(bck))
 	else:
-		gr = c_u.execute('select groups from parents where tgID=?', (callback_query.from_user.id,)).fetchone()[0]
+
 		uch = InlineKeyboardButton(text = 'Участвую', callback_data = 'Участвую')
 		neuch = InlineKeyboardButton(text = 'Не участвую', callback_data = 'Не участвую')
-		q = c_u.execute(f'select * from Event where namee = ? and groups=?', (callback_query.data, gr)).fetchone()
 		kb = InlineKeyboardMarkup()
 		bck = InlineKeyboardButton(text = 'Назад', callback_data = 'Назад')
 		spisok = InlineKeyboardButton(text = 'Список участников', callback_data = 'Список участников')
@@ -955,12 +1060,18 @@ async def bck(callback_query: types.CallbackQuery):
 	kb = InlineKeyboardMarkup()
 	exit = InlineKeyboardButton(text = 'Закрыть', callback_data = 'exit')
 	bck = InlineKeyboardButton(text = "Профиль", callback_data = 'back_to_profile')
-	gr = c_u.execute('select groups from parents where tgID=?', (callback_query.from_user.id,)).fetchone()[0]
-	ev = c_u.execute('SELECT * FROM Event where groups = ? ', (gr,)).fetchall()
+	gr = set(c_u.execute('select groups from parents where tgID=?', (callback_query.from_user.id,)).fetchall())
+
+	mers = []
+	for grp in gr:
+		ev = c_u.execute('SELECT * FROM Event where groups = ? ', (grp[0],)).fetchall()
+		for e in ev:
+
+			mers.append(e)
 	out = "ВСЕ МЕРОПРИЯТИЯ:\n\n"
 	cnt = 1
-	for e in ev:
-		kb.add(InlineKeyboardButton(text = f'{e[2]}', callback_data = f'{e[2]}'))
+	for e in mers:
+		kb.add(InlineKeyboardButton(text = f'{e[2]}', callback_data = f'{e[6]}'))
 		out += f"{cnt} мероприятие:\n\t\tДата мероприятия: {e[1]}\n\t\tНазвание мероприятия: {e[2]}\n\t\tОрганизатор мероприятия: {e[3]}\n\t\tСумма с каждого: {e[4]}\n\n"
 		cnt += 1
 	await callback_query.message.edit_text(out, reply_markup = kb.add(bck, exit))
@@ -970,6 +1081,14 @@ async def delete_message(message: types.Message, sleep_time: int = 0):
     await asyncio.sleep(sleep_time)
     with suppress(MessageCantBeDeleted, MessageToDeleteNotFound):
         await message.delete()
+
+@dp.message_handler(lambda message: '/news ' in message.text.lower() and message.chat.type == 'private')
+async def profile(message: types.Message):
+	gr = c_u.execute('select groups from admins where tgID=?', (message.from_user.id,)).fetchone()[0]
+	data = set(c_u.execute('SELECT groupID FROM parents where groups=? and tgID=?', (gr, message.from_user.id)).fetchall())
+	exit = InlineKeyboardButton(text = 'Закрыть', callback_data = 'exit')
+	await message.answer(f'{message.text}', reply_markup = genmarkup(data).add(exit))
+	asyncio.create_task(delete_message(message, 0))
 
 # классический запуск
 if __name__ == "__main__":
