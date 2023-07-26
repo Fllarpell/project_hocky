@@ -4,7 +4,7 @@ api_id = 25960001
 api_hash = "86da715ea0ed76925b740c209710626f"
 
 async def vecher_v_hatu(chat_id):
-    async with Client("project_hockey", api_id, api_hash) as app:
+    async with Client("project_hocky", api_id, api_hash) as app:
         returned_list = []
         async for member in app.get_chat_members(chat_id):
             if member.user.is_bot:
